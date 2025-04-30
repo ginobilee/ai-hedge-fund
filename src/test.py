@@ -31,7 +31,7 @@ if __name__ == "__main__":
     # 设置日期和其他参数
     end_date = "2022-12-31"
     period = "annual"  # 年度数据
-    limit = 5  # 最近5个报告期
+    limit = 1  # 最近1个报告期
     
     # 如果提供了额外参数
     if len(sys.argv) > 2:

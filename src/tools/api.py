@@ -186,7 +186,7 @@ def get_financial_metrics(
         # 只保留最近的limit个报告期且不晚于end_date
         valid_dates = [d for d in dates if str(d) <= end_date]
         valid_dates = valid_dates[:limit]
-        print(f"z222222222: {valid_dates}")        
+        # print(f"z222222222: {valid_dates}")        
         
         if not valid_dates:
             return []
@@ -198,38 +198,38 @@ def get_financial_metrics(
             net_income = safe_get_value(income_stmt, '净利润', date, date_field_name='报告日')
             print(f"api.py: date: {date}, net_income: {net_income}")
 
-            print(f"api.py: fin_indicator: {fin_indicator}")
+            # print(f"api.py: fin_indicator: {fin_indicator}")
             # todo: eps_basic 对应的原来的哪个字段，应该从新的接口里取哪个字段？
             eps_basic = safe_get_value(fin_indicator, '基本每股收益', date, '日期')
             print(f"api.py: date: {date}, eps_basic: {eps_basic}")
             # 创建财务指标对象，使用安全的获取方式
-            # try:
-            #     metrics = FinancialMetrics(
-            #         ticker=ticker,
-            #         report_period=str(date),
-            #         revenue=safe_get_value(income_stmt, "营业收入", date),
-            #         gross_profit=safe_get_value(income_stmt, "营业利润", date),
-            #         operating_income=safe_get_value(income_stmt, "营业利润", date),
-            #         net_income=safe_get_value(income_stmt, "净利润", date),
-            #         eps_basic=safe_get_value(fin_indicator, "基本每股收益", date),
-            #         eps_diluted=safe_get_value(fin_indicator, "稀释每股收益", date),
-            #         dividend_per_share=safe_get_value(fin_indicator, "每股股利", date),
-            #         total_assets=safe_get_value(balance_sheet, "资产总计", date),
-            #         total_equity=safe_get_value(balance_sheet, "所有者权益(或股东权益)合计", date),
-            #         free_cash_flow=safe_get_value(cash_flow, "经营活动产生的现金流量净额", date),
-            #         operating_cash_flow=safe_get_value(cash_flow, "经营活动产生的现金流量净额", date),
-            #         pe_ratio=None,  # 将在下一步计算
-            #         market_cap=market_cap,
-            #     )
+            try:
+                metrics = FinancialMetrics(
+                    ticker=ticker,
+                    report_period=str(date),
+                    revenue=safe_get_value(income_stmt, "营业收入", date),
+                    gross_profit=safe_get_value(income_stmt, "营业利润", date),
+                    operating_income=safe_get_value(income_stmt, "营业利润", date),
+                    net_income=safe_get_value(income_stmt, "净利润", date),
+                    eps_basic=safe_get_value(fin_indicator, "基本每股收益", date),
+                    eps_diluted=safe_get_value(fin_indicator, "稀释每股收益", date),
+                    dividend_per_share=safe_get_value(fin_indicator, "每股股利", date),
+                    total_assets=safe_get_value(balance_sheet, "资产总计", date),
+                    total_equity=safe_get_value(balance_sheet, "所有者权益(或股东权益)合计", date),
+                    free_cash_flow=safe_get_value(cash_flow, "经营活动产生的现金流量净额", date),
+                    operating_cash_flow=safe_get_value(cash_flow, "经营活动产生的现金流量净额", date),
+                    pe_ratio=None,  # 将在下一步计算
+                    market_cap=market_cap,
+                )
                 
-            #     # 计算PE比率
-            #     if metrics.net_income and metrics.net_income > 0 and market_cap:
-            #         metrics.pe_ratio = market_cap / metrics.net_income
+                # 计算PE比率
+                if metrics.net_income and metrics.net_income > 0 and market_cap:
+                    metrics.pe_ratio = market_cap / metrics.net_income
                 
-            #     metrics_list.append(metrics)
-            # except Exception as e:
-            #     print(f"Error creating metrics for {ticker} at {date}: {e}")
-            #     continue
+                metrics_list.append(metrics)
+            except Exception as e:
+                print(f"Error creating metrics for {ticker} at {date}: {e}")
+                continue
             
         # 缓存结果
         if metrics_list:
