@@ -1,6 +1,6 @@
 import sys
 
-from tests.test_get_prices import test_stock_prices
+# from tests.test_get_prices import test_stock_prices
 from tests.test_financial_metrics import test_financial_metrics
 # test_stock_prices("000001", "2024-01-01", "2024-01-31")
 

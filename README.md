@@ -17,7 +17,7 @@ This system employs several agents working together:
 11. Risk Manager - Calculates risk metrics and sets position limits
 12. Portfolio Manager - Makes final trading decisions and generates orders
 
-<img width="1020" alt="Screenshot 2025-03-08 at 4 45 22 PM" src="https://github.com/user-attachments/assets/d8ab891e-a083-4fed-b514-ccc9322a3e57" />
+<img width="1020" alt="Screenshot 2025-03-08 at 4 45 22 PM" src="https://github.com/user-attachments/assets/d8ab891e-a083-4fed-b514-ccc9322a3e57" />
 
 **Note**: the system simulates trading decisions, it does not actually trade.
 
@@ -53,17 +53,39 @@ git clone https://github.com/virattt/ai-hedge-fund.git
 cd ai-hedge-fund
 ```
 
-1. Install Poetry (if not already installed):
+1. Install uv (if not already installed):
 ```bash
-curl -sSL https://install.python-poetry.org | python3 -
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-2. Install dependencies:
+2. Create and activate a virtual environment:
 ```bash
-poetry install
+# 创建虚拟环境（使用默认 Python 版本）
+uv venv
+
+# 或者指定 Python 版本
+uv venv --python=3.9  # 使用 Python 3.9
+# 或
+uv venv --python=3.10  # 使用 Python 3.10
+# 或
+uv venv --python=3.11  # 使用 Python 3.11
+
+# 激活虚拟环境
+source .venv/bin/activate  # On Unix/macOS
+# or
+.venv\Scripts\activate  # On Windows
 ```
 
-3. Set up your environment variables:
+3. Install dependencies:
+```bash
+# For production dependencies
+uv pip install -r requirements.txt
+
+# For development dependencies (including testing tools)
+uv pip install -r requirements-dev.txt
+```
+
+4. Set up your environment variables:
 ```bash
 # Create .env file for your API keys
 cp .env.example .env
@@ -94,36 +116,36 @@ For any other ticker, you will need to set the `FINANCIAL_DATASETS_API_KEY` in t
 
 ### Running the Hedge Fund
 ```bash
-poetry run python src/main.py --ticker AAPL,MSFT,NVDA
+python src/main.py --ticker AAPL,MSFT,NVDA
 ```
 
 **Example Output:**
-<img width="992" alt="Screenshot 2025-01-06 at 5 50 17 PM" src="https://github.com/user-attachments/assets/e8ca04bf-9989-4a7d-a8b4-34e04666663b" />
+<img width="992" alt="Screenshot 2025-01-06 at 5 50 17 PM" src="https://github.com/user-attachments/assets/e8ca04bf-9989-4a7d-a8b4-34e04666663b" />
 
 You can also specify a `--show-reasoning` flag to print the reasoning of each agent to the console.
 
 ```bash
-poetry run python src/main.py --ticker AAPL,MSFT,NVDA --show-reasoning
+python src/main.py --ticker AAPL,MSFT,NVDA --show-reasoning
 ```
 You can optionally specify the start and end dates to make decisions for a specific time period.
 
 ```bash
-poetry run python src/main.py --ticker AAPL,MSFT,NVDA --start-date 2024-01-01 --end-date 2024-03-01 
+python src/main.py --ticker AAPL,MSFT,NVDA --start-date 2024-01-01 --end-date 2024-03-01 
 ```
 
 ### Running the Backtester
 
 ```bash
-poetry run python src/backtester.py --ticker AAPL,MSFT,NVDA
+python src/backtester.py --ticker AAPL,MSFT,NVDA
 ```
 
 **Example Output:**
-<img width="941" alt="Screenshot 2025-01-06 at 5 47 52 PM" src="https://github.com/user-attachments/assets/00e794ea-8628-44e6-9a84-8f8a31ad3b47" />
+<img width="941" alt="Screenshot 2025-01-06 at 5 47 52 PM" src="https://github.com/user-attachments/assets/00e794ea-8628-44e6-9a84-8f8a31ad3b47" />
 
 You can optionally specify the start and end dates to backtest over a specific time period.
 
 ```bash
-poetry run python src/backtester.py --ticker AAPL,MSFT,NVDA --start-date 2024-01-01 --end-date 2024-03-01
+python src/backtester.py --ticker AAPL,MSFT,NVDA --start-date 2024-01-01 --end-date 2024-03-01
 ```
 
 ## Project Structure 
@@ -139,6 +161,17 @@ ai-hedge-fund/
 │   │   ├── technicals.py         # Technical analysis agent
 │   │   ├── valuation.py          # Valuation analysis agent
 │   │   ├── warren_buffett.py     # Warren Buffett agent
+│   │   ├── ben_graham.py         # Ben Graham agent
+│   │   ├── cathie_wood.py        # Cathie Wood agent
+│   │   ├── charlie_munger.py     # Charlie Munger agent
+│   │   ├── stanley_druckenmiller.py # Stanley Druckenmiller agent
+│   │   ├── warren_buffett.py     # Warren Buffett agent
+│   │   ├── valuation.py          # Valuation analysis agent
+│   │   ├── sentiment.py          # Sentiment analysis agent
+│   │   ├── fundamentals.py       # Fundamental analysis agent
+│   │   ├── technicals.py         # Technical analysis agent
+│   │   ├── risk_manager.py       # Risk management agent
+│   │   ├── portfolio_manager.py  # Portfolio management agent
 │   ├── tools/                    # Agent tools
 │   │   ├── api.py                # API tools
 │   ├── backtester.py             # Backtesting tools

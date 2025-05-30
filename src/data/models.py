@@ -19,7 +19,7 @@ class FinancialMetrics(BaseModel):
     ticker: str
     report_period: str
     period: str
-    currency: str
+    currency: str # 货币单位（如CNY）
     market_cap: float | None
     enterprise_value: float | None
     price_to_earnings_ratio: float | None

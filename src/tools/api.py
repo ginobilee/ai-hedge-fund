@@ -101,6 +101,85 @@ def calculate_start_year(end_date: str, limit: int) -> int:
     # 计算起始年份
     return str(dt.year - limit)  # [6,7](@ref)
 
+def normalize_date(date_str):
+    """标准化日期格式，移除所有分隔符和时间部分"""
+    if isinstance(date_str, str):
+        # 如果包含时间，只保留日期部分
+        if " " in date_str:
+            date_str = date_str.split(" ")[0]
+        return date_str.replace("-", "").replace("/", "").replace(".", "")
+    elif pd.isna(date_str):
+        return None
+    return str(date_str).split(" ")[0].replace("-", "").replace("/", "").replace(".", "")
+
+def calculate_ebitda(profit_sheet_dc: pd.DataFrame, cash_flow_dc: pd.DataFrame, date: str):
+    # 计算 EBITDA
+    try:
+        date = normalize_date(date)
+        print(f"api.py: calculate ebitda for {date} ")
+        # print(f"calculate ebitda, profit_sheet_dc is : {profit_sheet_dc}")
+
+        operating_profit = None
+        net_profit_parent = None
+        net_profit_deducted = None
+        financial_expense = None
+
+        # 获取对应date的数据
+        date_field_name = 'REPORT_DATE'
+        profit_sheet_dc[date_field_name] = profit_sheet_dc[date_field_name].apply(normalize_date)
+        # print(f"profit_sheet_dc after apply normalize_date: {profit_sheet_dc}")
+        data_for_date = profit_sheet_dc[profit_sheet_dc[date_field_name] == date].iloc[0]
+        
+        # 计算各项指标
+        operating_profit = safe_float(data_for_date['OPERATE_PROFIT'])    # 营业利润
+        net_profit_parent = safe_float(data_for_date['PARENT_NETPROFIT']) # 归属于母公司股东的净利润
+        net_profit_deducted = safe_float(data_for_date['DEDUCT_PARENT_NETPROFIT']) # 扣除非经常性损益后的净利润
+        financial_expense = safe_float(data_for_date['FINANCE_EXPENSE']) # 财务费用
+        
+        print("\n财务指标:")
+        print(f"报告期: {data_for_date['REPORT_DATE']}")
+        print(f"营业利润: {operating_profit/100000000:.2f}亿")
+        print(f"归属于母公司股东的净利润: {net_profit_parent/100000000:.2f}亿")
+        print(f"扣除非经常性损益后的净利润: {net_profit_deducted/100000000:.2f}亿")
+        print(f"财务费用: {financial_expense/100000000:.2f}亿")
+        
+        
+        depreciation = None
+        ir_depr = None
+        ia_amortize = None
+        defer_income_amortize = None
+        total_depreciation = None
+        total_amortization = None
+
+        cash_flow_dc[date_field_name] = cash_flow_dc[date_field_name].apply(normalize_date)
+        cash_flow_data = cash_flow_dc[cash_flow_dc[date_field_name] == date].iloc[0] # 获取对应date的数据
+        
+        print(f"\n现金流量指标: \n报告期: {cash_flow_data['REPORT_DATE']}")
+        # 获取固定资产折旧、油气资产折耗、生产性生物资产折旧
+        depreciation = safe_float(cash_flow_data['FA_IR_DEPR']) # 固定资产折旧/投资性房地产折旧
+        print(f"固定资产折旧、油气资产折耗、生产性生物资产折旧: {depreciation/100000000:.2f}亿")
+        
+        # 获取摊销
+        ir_depr = safe_float(cash_flow_data['IR_DEPR']) # 无形资产摊销
+        ia_amortize = safe_float(cash_flow_data['IA_AMORTIZE']) # 长期待摊费用摊销
+        defer_income_amortize = safe_float(cash_flow_data['DEFER_INCOME_AMORTIZE']) # 递延收益摊销
+        print(f"无形资产摊销: {ir_depr/100000000:.2f}亿, 长期待摊费用摊销: {ia_amortize/100000000:.2f}, 递延收益摊销: {defer_income_amortize/100000000:.2f}")
+
+        # 计算总折旧
+        total_depreciation = depreciation
+        print(f"总折旧: {total_depreciation/100000000:.2f}亿")
+
+        # 计算总摊销
+        total_amortization = ir_depr + ia_amortize + defer_income_amortize
+        print(f"总摊销: {total_amortization/100000000:.2f}亿")
+
+        ebitda = operating_profit - (net_profit_parent - net_profit_deducted) + financial_expense + total_depreciation + total_amortization
+        print(f"EBITDA: {ebitda/100000000:.2f}亿")
+
+        return ebitda
+    except Exception as e:
+        print(f"Error calculating ebitda: {e}")
+        return None
 
     
 def get_financial_metrics(
@@ -126,7 +205,8 @@ def get_financial_metrics(
     try:
         # 获取主要财务指标
         fin_indicator = ak.stock_financial_analysis_indicator(symbol=pure_ticker, start_year=start_year)
-        
+        # print(f"api.py: fin_indicator: {fin_indicator}")
+
         # 尝试获取资产负债表
         try:
             balance_sheet = ak.stock_financial_report_sina(stock=ticker, symbol="资产负债表")
@@ -135,7 +215,8 @@ def get_financial_metrics(
                 balance_sheet = ak.stock_financial_report_sina(stock=ticker)
             except:
                 balance_sheet = pd.DataFrame()
-        
+        # print(f"api.py: balance_sheet: {balance_sheet}")
+
         # 尝试获取利润表
         try:
             income_stmt = ak.stock_financial_report_sina(stock=ticker, symbol="利润表")
@@ -144,6 +225,16 @@ def get_financial_metrics(
                 income_stmt = ak.stock_financial_report_sina(stock=ticker)
             except:
                 income_stmt = pd.DataFrame()
+        # print(f"api.py: income_stmt: {income_stmt}")
+
+        # 获取 东财 利润表数据
+        profit_sheet_dc = None
+        try:
+            profit_sheet_dc = ak.stock_profit_sheet_by_report_em(symbol=ticker)
+            print(f"first get profit sheet from dc: {profit_sheet_dc}")
+        except Exception as e:
+            print(f"get profit_sheet_dc error: {e} ")
+            profit_sheet_dc = pd.DataFrame()
 
         # 尝试获取现金流量表
         try:
@@ -153,18 +244,29 @@ def get_financial_metrics(
                 cash_flow = ak.stock_financial_report_sina(stock=ticker)
             except:
                 cash_flow = pd.DataFrame()
+        # print(f"api.py: cash_flow: {cash_flow}")
 
-        # 获取实时行情以计算市值
-        market_cap = None
+        # 获取 东财 现金流量表数据
         try:
-            quote_df = ak.stock_zh_a_spot_em()
-            for _, row in quote_df.iterrows():
-                if row['代码'] == pure_ticker:
-                    # 总市值（亿元）
-                    market_cap = float(row['总市值']) * 100000000  # 转为元
-                    break
+            cash_flow_dc = ak.stock_cash_flow_sheet_by_report_em(symbol=ticker)
+        except:
+            cash_flow_dc = pd.DataFrame()
+
+        # 计算市值、市盈率 todo: 这些都是最新数据，其实下面的计算要的是历史数据
+        market_cap = None
+        price_to_earnings_ratio = None
+        price_to_book_ratio = None
+        try:
+            stock_a_indicator_lg_df = ak.stock_a_indicator_lg(pure_ticker)
+
+            price_to_sales_ratio = stock_a_indicator_lg_df['ps_ttm'].iloc[0]
+            price_to_book_ratio = stock_a_indicator_lg_df['pb'].iloc[0]
+            price_to_earnings_ratio = stock_a_indicator_lg_df['pe_ttm'].iloc[0]
+            market_cap = stock_a_indicator_lg_df['total_mv'].iloc[0]
         except:
             pass
+
+        print(f"market_cap: {market_cap}, price_to_earnings_ratio: {price_to_earnings_ratio}, price_to_book_ratio: {price_to_book_ratio}, price_to_sales_ratio: {price_to_sales_ratio}")
                 
         # 获取报告期 - 优先使用财务指标的报告期
         dates = []
@@ -172,54 +274,56 @@ def get_financial_metrics(
         if not fin_indicator.empty:
             dates = fin_indicator[["日期"]]
         
-        # 如果没有找到报告期，尝试使用其他表格的报告期
-        # if not dates:
-        #     print("1111")  
-        #     all_dfs = [df for df in [balance_sheet, income_stmt, cash_flow] if not df.empty]
-        #     for df in all_dfs:
-        #         if len(df.columns) > 1:  # 确保有数据列
-        #             # 第一列通常是项目名称，其他列是报告期
-        #             dates = df[["日期"]]  # list(df.columns[1:])
-        #             break
-
         dates = dates["日期"].tolist()
         # 只保留最近的limit个报告期且不晚于end_date
         valid_dates = [d for d in dates if str(d) <= end_date]
         valid_dates = valid_dates[:limit]
-        # print(f"z222222222: {valid_dates}")        
+        print(f"z222222222: {valid_dates}")        
         
         if not valid_dates:
             return []
 
-        # print(f"income_stmt: {income_stmt}")
         # 构建结果
         metrics_list = []
         for date in valid_dates:
-            net_income = safe_get_value(income_stmt, '净利润', date, date_field_name='报告日')
-            print(f"api.py: date: {date}, net_income: {net_income}")
+            # net_income = safe_get_value(income_stmt, '净利润', date, date_field_name='报告日')
+            # print(f"api.py: date: {date}, net_income: {net_income}")
 
             # print(f"api.py: fin_indicator: {fin_indicator}")
-            # todo: eps_basic 对应的原来的哪个字段，应该从新的接口里取哪个字段？
-            eps_basic = safe_get_value(fin_indicator, '基本每股收益', date, '日期')
-            print(f"api.py: date: {date}, eps_basic: {eps_basic}")
+            # eps_basic = safe_get_value(fin_indicator, '每股收益_调整后(元)', date, '日期')
+
+            enterprise_value = calculate_enterprise_value(market_cap, balance_sheet, date)
+            print(f"企业价值(EV): {enterprise_value/100000000:.2f}亿")
+
+            ebitda = calculate_ebitda(profit_sheet_dc, cash_flow_dc, date)
+            enterprise_value_to_ebitda_ratio = enterprise_value / ebitda
+            print(f"ebitda: {ebitda/100000000:.2f}亿; enterprise_value_to_ebitda_ratio: {enterprise_value_to_ebitda_ratio}")
             # 创建财务指标对象，使用安全的获取方式
             try:
+                # 计算企业价值
+                
                 metrics = FinancialMetrics(
                     ticker=ticker,
                     report_period=str(date),
-                    revenue=safe_get_value(income_stmt, "营业收入", date),
-                    gross_profit=safe_get_value(income_stmt, "营业利润", date),
-                    operating_income=safe_get_value(income_stmt, "营业利润", date),
-                    net_income=safe_get_value(income_stmt, "净利润", date),
-                    eps_basic=safe_get_value(fin_indicator, "基本每股收益", date),
-                    eps_diluted=safe_get_value(fin_indicator, "稀释每股收益", date),
-                    dividend_per_share=safe_get_value(fin_indicator, "每股股利", date),
-                    total_assets=safe_get_value(balance_sheet, "资产总计", date),
-                    total_equity=safe_get_value(balance_sheet, "所有者权益(或股东权益)合计", date),
-                    free_cash_flow=safe_get_value(cash_flow, "经营活动产生的现金流量净额", date),
-                    operating_cash_flow=safe_get_value(cash_flow, "经营活动产生的现金流量净额", date),
-                    pe_ratio=None,  # 将在下一步计算
+                    
                     market_cap=market_cap,
+                    net_income=safe_get_value(income_stmt, '净利润', date, date_field_name='报告日'),
+                    eps_basic=safe_get_value(fin_indicator, '每股收益_调整后(元)', date, '日期'),
+                    
+                    enterprise_value=enterprise_value,
+                    price_to_earnings_ratio=price_to_earnings_ratio,
+                    price_to_book_ratio=price_to_book_ratio,
+                    price_to_sales_ratio=price_to_sales_ratio,
+                    # revenue=safe_get_value(income_stmt, "营业收入", date),
+                    # gross_profit=safe_get_value(income_stmt, "营业利润", date),
+                    # operating_income=safe_get_value(income_stmt, "营业利润", date),
+                    # eps_diluted=safe_get_value(fin_indicator, "稀释每股收益", date),
+                    # dividend_per_share=safe_get_value(fin_indicator, "每股股利", date),
+                    # total_assets=safe_get_value(balance_sheet, "资产总计", date),
+                    # total_equity=safe_get_value(balance_sheet, "所有者权益(或股东权益)合计", date),
+                    # free_cash_flow=safe_get_value(cash_flow, "经营活动产生的现金流量净额", date),
+                    # operating_cash_flow=safe_get_value(cash_flow, "经营活动产生的现金流量净额", date),
+                    pe_ratio=None,  # 将在下一步计算
                 )
                 
                 # 计算PE比率
@@ -594,58 +698,120 @@ def get_market_cap(
 
 # 辅助函数
 def safe_get_value(df, item_name, date, date_field_name="日期"):
-    """从DataFrame中安全地获取特定项目和日期的值"""
+    """从DataFrame中安全地获取特定项目和日期的值
+    
+    Args:
+        df: DataFrame 数据
+        item_name: 要获取的指标名称
+        date: 日期，支持多种格式 (YYYY-MM-DD, YYYYMMDD, YYYY/MM/DD)
+        date_field_name: 日期字段的名称
+    """
     try:
         if df.empty:
+            print(f"警告: DataFrame为空")
             return None
             
-        # print(f"safe_get_value: {df.columns} ")
+        def normalize_date(date_str):
+            """标准化日期格式，移除所有分隔符"""
+            if isinstance(date_str, str):
+                return date_str.replace("-", "").replace("/", "").replace(".", "")
+            elif pd.isna(date_str):
+                return None
+            return str(date_str).replace("-", "").replace("/", "").replace(".", "")
+
+        # 标准化输入的日期
+        target_date = normalize_date(date)
+        
         # 检查DataFrame的结构
         if item_name in df.columns:
             # 宽表格式：项目名称是列名
             if date_field_name is not None:
-                # 将输入日期转换为无分隔符的格式以进行比较
-                date_str = str(date)
-                if "-" in date_str:
-                    # 如果输入日期格式为"YYYY-MM-DD"，转换为"YYYYMMDD"
-                    date_str = date_str.replace("-", "")
-
+                # 标准化DataFrame中的日期列
+                df[date_field_name] = df[date_field_name].apply(normalize_date)
+                
                 # 查找匹配日期的行
-                matched_rows = df[date_field_name].astype(str) == date_str
-                # print(f"safe_get_value: matched_rows: {matched_rows}")
+                matched_rows = df[date_field_name] == target_date
                 if matched_rows.any():
-                    # print("matched_rows.any--------------------------------")
                     row = df.loc[matched_rows]
                     if not row.empty:
-                        # print(f"not row.empty----{row[item_name].values[0]}, {row[date_field_name].values[0]}----------------------------")
-                        return float(row[item_name].values[0])
+                        value = row[item_name].values[0]
+                        if pd.isna(value):
+                            print(f"警告: 值为空")
+                            return None
+                        return float(value)
+                    else:
+                        print(f"警告: 未找到匹配的行")
+                else:
+                    print(f"警告: 未找到匹配的日期 {target_date}")
+                    print(f"可用的日期: {df[date_field_name].unique()}")
 
-            # else:
-            #     # 如果没有指定日期字段，尝试使用第一列作为日期
-            #     date_col = df.columns[0]
-            #     date_str = str(date).replace("-", "")
-            #     row = df[df[date_col].astype(str) == date_str]
-            #     if not row.empty:
-            #         return float(row[item_name].values[0])
         else:
             # 长表格式：项目名称在第一列
             row = df[df.iloc[:, 0] == item_name]
             if not row.empty:
-                date_str = str(date)
-                if date_str in row.columns:
-                    value = row[date_str].values[0]
+                # 标准化列名（日期）
+                normalized_columns = {col: normalize_date(col) for col in row.columns}
+                row = row.rename(columns=normalized_columns)
+                
+                if target_date in normalized_columns.values():
+                    # 找到对应的原始列名
+                    original_col = next(col for col, norm_col in normalized_columns.items() 
+                                     if norm_col == target_date)
+                    value = row[original_col].values[0]
+                    if pd.isna(value):
+                        print(f"警告: 值为空")
+                        return None
                     # 转换为浮点数
                     if isinstance(value, str):
                         value = value.replace(',', '')
                         return float(value)
-                    elif pd.isna(value):
-                        return None
                     else:
                         return float(value)
+                else:
+                    print(f"警告: 未找到日期列 {target_date}")
+                    print(f"可用的日期: {list(normalized_columns.values())}")
+            else:
+                print(f"警告: 未找到项目 {item_name}")
                     
         return None
     except Exception as e:
-        print(f"safe_get_value error: {e}")
+        print(f"获取值失败: {e}")
+        return None
+
+
+def calculate_enterprise_value(market_cap: float, balance_sheet: pd.DataFrame, date: str) -> float:
+    """计算企业价值(EV)
+    
+    EV = Market Cap + Total Debt - Cash & Equivalents + Minority Interest
+    
+    Args:
+        market_cap: 市值（元）
+        balance_sheet: 资产负债表数据
+        date: 报告期
+    """
+    try:
+        if pd.isna(market_cap) or market_cap is None:
+            return None
+        
+        # 获取最新一期的数据（第一行） #todo: 修改为取 date 日的数据
+        latest_data = balance_sheet.iloc[0]
+        
+        # 计算总债务
+        total_debt = safe_float(latest_data['负债合计'])
+        
+        # 获取现金及等价物 (货币资金 + 交易性金融资产)
+        cash_equivalents = safe_float(latest_data['货币资金']) + safe_float(latest_data['交易性金融资产'])
+        
+        # 获取少数股东权益
+        minority_interest = safe_float(latest_data['少数股东权益'])
+        
+        # 计算企业价值
+        ev = market_cap + total_debt - cash_equivalents + minority_interest
+        
+        return ev
+        
+    except Exception as e:
+        print(f"计算企业价值失败: {e}")
         return None
 
 
@@ -668,3 +834,15 @@ def prices_to_df(prices: list[Price]) -> pd.DataFrame:
 def get_price_data(ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
     prices = get_prices(ticker, start_date, end_date)
     return prices_to_df(prices)
+
+def safe_float(value):
+    """安全地将值转换为浮点数，处理nan值"""
+    try:
+        if pd.isna(value):
+            return 0.0
+        if isinstance(value, str):
+            return float(value.replace(',', ''))
+        return float(value)
+    except Exception as e:
+        print(f"safe_float 转换为浮点数失败: {e}")
+        return 0.0
