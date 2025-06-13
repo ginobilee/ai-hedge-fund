@@ -197,7 +197,19 @@ def calculate_ebitda(profit_sheet_dc: pd.DataFrame, cash_flow_dc: pd.DataFrame, 
         print(f"Error calculating ebitda: {e}")
         return None
 
-    
+def get_pe_pb_ps(indicator: pd.DataFrame, date: str):
+    data = indicator[indicator['date']==date].iloc[0]
+    # print(data)
+    price_to_sales_ratio = data['ps_ttm']
+    price_to_book_ratio = data['pb']
+    price_to_earnings_ratio = data['pe_ttm']
+    # print(price_to_book_ratio, price_to_sales_ratio,  price_to_earnings_ratio)
+    return {
+        'pe': price_to_earnings_ratio,
+        'pb': price_to_book_ratio,
+        'ps': price_to_sales_ratio
+    }
+ 
 def get_financial_metrics(
     ticker: str,
     end_date: str,
@@ -270,17 +282,9 @@ def get_financial_metrics(
         except:
             cash_flow_dc = pd.DataFrame()
 
-        # 计算 市盈率 todo: 这些都是最新数据，其实下面的计算要的是历史数据
-        price_to_earnings_ratio = None
-        price_to_book_ratio = None
-        try:
-            stock_a_indicator_lg_df = ak.stock_a_indicator_lg(pure_ticker)
-
-            price_to_sales_ratio = stock_a_indicator_lg_df['ps_ttm'].iloc[0]
-            price_to_book_ratio = stock_a_indicator_lg_df['pb'].iloc[0]
-            price_to_earnings_ratio = stock_a_indicator_lg_df['pe_ttm'].iloc[0]
-        except:
-            pass
+        # 计算 市盈率
+        stock_a_indicator = ak.stock_a_indicator_lg(pure_ticker)
+        stock_a_indicator['date'] = stock_a_indicator['trade_date'].apply(normalize_date)
 
         print('-- calculate market_cap ----------------------------------------------------------------------------------------------------------------')
         stock_individual_info_em_df = ak.stock_individual_info_em(symbol=pure_ticker)
@@ -323,6 +327,13 @@ def get_financial_metrics(
             ebitda = calculate_ebitda(profit_sheet_dc, cash_flow_dc, date)
             enterprise_value_to_ebitda_ratio = enterprise_value / ebitda
             print(f"ebitda: {ebitda/100000000:.2f}亿; enterprise_value_to_ebitda_ratio: {enterprise_value_to_ebitda_ratio}")
+            
+            print('------------- for date in date_list, calculate pe/pb/ps ----------------------------------')
+            pdata = get_pe_pb_ps(stock_a_indicator, date)
+            pe = pdata['pe']
+            pb = pdata['pb']
+            ps = pdata['ps']
+            print(pe, pb, ps)
             # 创建财务指标对象，使用安全的获取方式
             try:
                 # 计算企业价值
@@ -332,14 +343,17 @@ def get_financial_metrics(
                     report_period=str(date),
                     
                     market_cap=market_cap,
+                    enterprise_value=enterprise_value,
+                    price_to_earnings_ratio=pe,
+                    price_to_book_ratio=pb,
+                    price_to_sales_ratio=ps,
+                    enterprise_value_to_ebitda_ratio=enterprise_value_to_ebitda_ratio,
+
                     net_income=safe_get_value(income_stmt, '净利润', date, date_field_name='报告日'),
                     eps_basic=safe_get_value(fin_indicator, '每股收益_调整后(元)', date, '日期'),
                     
-                    enterprise_value=enterprise_value,
                     # ---- 以上指标已OK ------
-                    price_to_earnings_ratio=price_to_earnings_ratio,
-                    price_to_book_ratio=price_to_book_ratio,
-                    price_to_sales_ratio=price_to_sales_ratio,
+                    # enterprise_value_to_revenue_ratio ---- 正在进行计算的指标 -------
                     # revenue=safe_get_value(income_stmt, "营业收入", date),
                     # gross_profit=safe_get_value(income_stmt, "营业利润", date),
                     # operating_income=safe_get_value(income_stmt, "营业利润", date),
