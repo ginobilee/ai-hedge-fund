@@ -2,12 +2,15 @@ from pydantic import BaseModel
 
 
 class Price(BaseModel):
+    date: str
+    time: str
     open: float
-    close: float
     high: float
     low: float
-    volume: int
-    time: str
+    close: float
+    volume: float
+    amount: float
+    ticker: str
 
 
 class PriceResponse(BaseModel):

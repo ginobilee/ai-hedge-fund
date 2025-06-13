@@ -1,8 +1,16 @@
 import os
+import sys
+
+# 添加项目根目录到 Python 路径
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.append(project_root)
+
+
 import pandas as pd
 import requests
 import akshare as ak
 from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
 import numpy as np
 
 from data.cache import get_cache
@@ -26,11 +34,11 @@ _cache = get_cache()
 def get_prices(ticker: str, start_date: str, end_date: str) -> list[Price]:
     """Fetch price data for A-shares using akshare."""
     # Check cache first
-    if cached_data := _cache.get_prices(ticker):
-        # Filter cached data by date range and convert to Price objects
-        filtered_data = [Price(**price) for price in cached_data if start_date <= price["time"] <= end_date]
-        if filtered_data:
-            return filtered_data
+    # if cached_data := _cache.get_prices(ticker):
+    #     # Filter cached data by date range and convert to Price objects
+    #     filtered_data = [Price(**price) for price in cached_data if start_date <= price["time"] <= end_date]
+    #     if filtered_data:
+    #         return filtered_data
 
     ak_ticker = ticker.replace('.', '')
     
@@ -54,6 +62,7 @@ def get_prices(ticker: str, start_date: str, end_date: str) -> list[Price]:
             
         # 转换为API预期的格式
         prices = []
+        print(f"prices: {df}")
         for _, row in df.iterrows():
             # 将日期转为ISO格式字符串
             if isinstance(row['日期'], str):
@@ -62,9 +71,9 @@ def get_prices(ticker: str, start_date: str, end_date: str) -> list[Price]:
                     date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
             else:
                 date_str = row['日期'].strftime('%Y-%m-%d')
-            
             price = Price(
                 time=date_str,
+                date=normalize_date(date_str),
                 open=float(row['开盘']),
                 high=float(row['最高']),
                 low=float(row['最低']),
@@ -100,6 +109,13 @@ def calculate_start_year(end_date: str, limit: int) -> int:
     dt = datetime.strptime(end_date, "%Y-%m-%d")  # [8,6](@ref)
     # 计算起始年份
     return str(dt.year - limit)  # [6,7](@ref)
+
+def calculate_start_date(end_date: str, limit: int) -> str:
+    dt = datetime.strptime(end_date, "%Y-%m-%d")  # [8,6](@ref)
+
+    years_ago = dt - relativedelta(years=limit)
+    result = years_ago.strftime("%Y-%m-%d")
+    return result
 
 def normalize_date(date_str):
     """标准化日期格式，移除所有分隔符和时间部分"""
@@ -201,6 +217,8 @@ def get_financial_metrics(
     pure_ticker = ticker.replace('sh.', '').replace('sz.', '').replace('sh', '').replace('sz', '').replace('SH', '').replace('SZ', '').replace('SH.', '').replace('SZ.', '')
     
     start_year = calculate_start_year(end_date, limit)
+    start_date = calculate_start_date(end_date, limit)
+    print(f"start date: {start_date}")
     
     try:
         # 获取主要财务指标
@@ -231,7 +249,7 @@ def get_financial_metrics(
         profit_sheet_dc = None
         try:
             profit_sheet_dc = ak.stock_profit_sheet_by_report_em(symbol=ticker)
-            print(f"first get profit sheet from dc: {profit_sheet_dc}")
+            # print(f"first get profit sheet from dc: {profit_sheet_dc}")
         except Exception as e:
             print(f"get profit_sheet_dc error: {e} ")
             profit_sheet_dc = pd.DataFrame()
@@ -252,8 +270,7 @@ def get_financial_metrics(
         except:
             cash_flow_dc = pd.DataFrame()
 
-        # 计算市值、市盈率 todo: 这些都是最新数据，其实下面的计算要的是历史数据
-        market_cap = None
+        # 计算 市盈率 todo: 这些都是最新数据，其实下面的计算要的是历史数据
         price_to_earnings_ratio = None
         price_to_book_ratio = None
         try:
@@ -262,15 +279,20 @@ def get_financial_metrics(
             price_to_sales_ratio = stock_a_indicator_lg_df['ps_ttm'].iloc[0]
             price_to_book_ratio = stock_a_indicator_lg_df['pb'].iloc[0]
             price_to_earnings_ratio = stock_a_indicator_lg_df['pe_ttm'].iloc[0]
-            market_cap = stock_a_indicator_lg_df['total_mv'].iloc[0]
         except:
             pass
 
-        print(f"market_cap: {market_cap}, price_to_earnings_ratio: {price_to_earnings_ratio}, price_to_book_ratio: {price_to_book_ratio}, price_to_sales_ratio: {price_to_sales_ratio}")
-                
+        print('-- calculate market_cap ----------------------------------------------------------------------------------------------------------------')
+        stock_individual_info_em_df = ak.stock_individual_info_em(symbol=pure_ticker)
+        total_share_capital = stock_individual_info_em_df[stock_individual_info_em_df['item'] == "总股本"]["value"].values[0]
+        # print(f"total_share_capital: {total_share_capital}")
+        prices = get_price_data(ticker=pure_ticker, start_date=start_date, end_date=end_date)
+        prices["market_cap"] = prices['close'] * total_share_capital
+        # print(prices.tail())
+        print('----------------------------------------------------------------------------------------------------------------')
+
         # 获取报告期 - 优先使用财务指标的报告期
         dates = []
-        print(f"api.py: fin_indicator 获取的报告期: ")
         if not fin_indicator.empty:
             dates = fin_indicator[["日期"]]
         
@@ -278,23 +300,26 @@ def get_financial_metrics(
         # 只保留最近的limit个报告期且不晚于end_date
         valid_dates = [d for d in dates if str(d) <= end_date]
         valid_dates = valid_dates[:limit]
-        print(f"z222222222: {valid_dates}")        
+        date_str_list = [d.strftime("%Y%m%d") for d in valid_dates]
+
+        print(f"z222222222: {date_str_list}")        
         
-        if not valid_dates:
+        if not date_str_list:
             return []
 
         # 构建结果
         metrics_list = []
-        for date in valid_dates:
-            # net_income = safe_get_value(income_stmt, '净利润', date, date_field_name='报告日')
-            # print(f"api.py: date: {date}, net_income: {net_income}")
-
-            # print(f"api.py: fin_indicator: {fin_indicator}")
-            # eps_basic = safe_get_value(fin_indicator, '每股收益_调整后(元)', date, '日期')
+        for date in date_str_list:
+            # 当天的市值 = 当天的价格[qfq] * 当前的股本数
+            print('------------- for date in date_list, calculate metric ------------------------------------')
+            # print(prices)
+            market_cap = prices[prices['date']==date]['market_cap'].iloc[0]
+            print(f"market_cap: {market_cap/100000000:.2f}亿")
 
             enterprise_value = calculate_enterprise_value(market_cap, balance_sheet, date)
             print(f"企业价值(EV): {enterprise_value/100000000:.2f}亿")
 
+            print('------------- for date in date_list, calculate ebitda ------------------------------------')
             ebitda = calculate_ebitda(profit_sheet_dc, cash_flow_dc, date)
             enterprise_value_to_ebitda_ratio = enterprise_value / ebitda
             print(f"ebitda: {ebitda/100000000:.2f}亿; enterprise_value_to_ebitda_ratio: {enterprise_value_to_ebitda_ratio}")
@@ -311,6 +336,7 @@ def get_financial_metrics(
                     eps_basic=safe_get_value(fin_indicator, '每股收益_调整后(元)', date, '日期'),
                     
                     enterprise_value=enterprise_value,
+                    # ---- 以上指标已OK ------
                     price_to_earnings_ratio=price_to_earnings_ratio,
                     price_to_book_ratio=price_to_book_ratio,
                     price_to_sales_ratio=price_to_sales_ratio,
@@ -343,6 +369,8 @@ def get_financial_metrics(
         
     except Exception as e:
         print(f"Error fetching financial metrics for {ticker}: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 
@@ -667,35 +695,6 @@ def get_company_news(
         print(f"Error fetching company news for {ticker}: {e}")
         return []
 
-
-def get_market_cap(
-    ticker: str,
-    end_date: str,
-) -> float | None:
-    """Fetch market cap for A-shares using akshare."""
-    # 移除市场前缀，获取纯股票代码
-    pure_ticker = ticker.replace('sh.', '').replace('sz.', '').replace('sh', '').replace('sz', '')
-    
-    try:
-        # 获取实时行情以获取最新市值
-        quote_df = ak.stock_zh_a_spot_em()
-        for _, row in quote_df.iterrows():
-            if row['代码'] == pure_ticker:
-                # 总市值（亿元）转换为元
-                return float(row['总市值']) * 100000000
-                
-        # 如果没有找到，尝试从财务指标获取
-        metrics = get_financial_metrics(ticker, end_date, limit=1)
-        if metrics and metrics[0].market_cap:
-            return metrics[0].market_cap
-            
-        return None
-        
-    except Exception as e:
-        print(f"Error fetching market cap for {ticker}: {e}")
-        return None
-
-
 # 辅助函数
 def safe_get_value(df, item_name, date, date_field_name="日期"):
     """从DataFrame中安全地获取特定项目和日期的值
@@ -710,14 +709,6 @@ def safe_get_value(df, item_name, date, date_field_name="日期"):
         if df.empty:
             print(f"警告: DataFrame为空")
             return None
-            
-        def normalize_date(date_str):
-            """标准化日期格式，移除所有分隔符"""
-            if isinstance(date_str, str):
-                return date_str.replace("-", "").replace("/", "").replace(".", "")
-            elif pd.isna(date_str):
-                return None
-            return str(date_str).replace("-", "").replace("/", "").replace(".", "")
 
         # 标准化输入的日期
         target_date = normalize_date(date)
@@ -793,27 +784,34 @@ def calculate_enterprise_value(market_cap: float, balance_sheet: pd.DataFrame, d
         if pd.isna(market_cap) or market_cap is None:
             return None
         
-        # 获取最新一期的数据（第一行） #todo: 修改为取 date 日的数据
-        latest_data = balance_sheet.iloc[0]
+        # 获取指定日期的数据
+        data = balance_sheet[balance_sheet['报告日']==date]
+        if data.empty:
+            print(f"未找到日期 {date} 的数据")
+            return None
+            
+        # 使用 .iloc[0] 获取第一个值
+        total_debt = safe_float(data['负债合计'].iloc[0])
+        cash = safe_float(data['货币资金'].iloc[0])
+        trading_assets = safe_float(data['交易性金融资产'].iloc[0])
+        minority_interest = safe_float(data['少数股东权益'].iloc[0])
         
-        # 计算总债务
-        total_debt = safe_float(latest_data['负债合计'])
-        
-        # 获取现金及等价物 (货币资金 + 交易性金融资产)
-        cash_equivalents = safe_float(latest_data['货币资金']) + safe_float(latest_data['交易性金融资产'])
-        
-        # 获取少数股东权益
-        minority_interest = safe_float(latest_data['少数股东权益'])
+        # 打印调试信息
+        # print(f"负债合计: {total_debt}")
+        # print(f"货币资金: {cash}")
+        # print(f"交易性金融资产: {trading_assets}")
+        # print(f"少数股东权益: {minority_interest}")
         
         # 计算企业价值
-        ev = market_cap + total_debt - cash_equivalents + minority_interest
+        ev = market_cap + total_debt - (cash + trading_assets) + minority_interest
         
         return ev
         
     except Exception as e:
         print(f"计算企业价值失败: {e}")
+        import traceback
+        traceback.print_exc()
         return None
-
 
 def prices_to_df(prices: list[Price]) -> pd.DataFrame:
     """Convert prices to a DataFrame."""
@@ -846,3 +844,51 @@ def safe_float(value):
     except Exception as e:
         print(f"safe_float 转换为浮点数失败: {e}")
         return 0.0
+
+def test_get_financial_metrics():
+    """测试获取财务指标的功能"""
+    print("\n=== 开始测试 get_financial_metrics ===")
+    
+    # 测试参数
+    test_ticker = "SH600519"  # 贵州茅台
+    test_end_date = "2024-03-20"
+    test_period = "annual"
+    test_limit = 3
+    
+    print(f"\n测试参数:")
+    print(f"股票代码: {test_ticker}")
+    print(f"结束日期: {test_end_date}")
+    print(f"周期: {test_period}")
+    print(f"限制数量: {test_limit}")
+    
+    try:
+        # 调用被测试的函数
+        metrics = get_financial_metrics(
+            ticker=test_ticker,
+            end_date=test_end_date,
+            period=test_period,
+            limit=test_limit
+        )
+        
+        # 打印结果
+        print(f"\n获取到 {len(metrics)} 条财务指标数据:")
+        for i, metric in enumerate(metrics, 1):
+            print(f"\n指标 {i}:")
+            print(f"报告期: {metric.report_period}")
+            print(f"市值: {metric.market_cap/100000000:.2f}亿" if metric.market_cap else "市值: 无数据")
+            print(f"企业价值: {metric.enterprise_value/100000000:.2f}亿" if metric.enterprise_value else "企业价值: 无数据")
+            print(f"市盈率: {metric.price_to_earnings_ratio:.2f}" if metric.price_to_earnings_ratio else "市盈率: 无数据")
+            print(f"市净率: {metric.price_to_book_ratio:.2f}" if metric.price_to_book_ratio else "市净率: 无数据")
+            print(f"市销率: {metric.price_to_sales_ratio:.2f}" if metric.price_to_sales_ratio else "市销率: 无数据")
+            print(f"EV/EBITDA: {metric.enterprise_value_to_ebitda_ratio:.2f}" if metric.enterprise_value_to_ebitda_ratio else "EV/EBITDA: 无数据")
+            
+    except Exception as e:
+        print(f"\n测试过程中发生错误: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    print("\n=== 测试完成 ===")
+
+if __name__ == "__main__":
+    # 执行测试
+    test_get_financial_metrics()
