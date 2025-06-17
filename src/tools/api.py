@@ -98,7 +98,7 @@ def get_prices(ticker: str, start_date: str, end_date: str) -> list[Price]:
         return []
 
 
-def calculate_start_year(end_date: str, limit: int) -> int:
+def calculate_start_year(end_date: str, limit: int):
     """
     计算end_date年份前推limit年的起始年份
     :param end_date: 字符串日期，支持常见格式如"2025-03-29"
@@ -209,7 +209,18 @@ def get_pe_pb_ps(indicator: pd.DataFrame, date: str):
         'pb': price_to_book_ratio,
         'ps': price_to_sales_ratio
     }
- 
+
+def get_report_date_list(fin_indicator: pd.DataFrame, limit: int):
+    dates = []
+    if not fin_indicator.empty:
+        dates = fin_indicator[["日期"]]
+
+    dates = dates["日期"].tolist()
+    valid_dates = [d for d in dates if normalize_date(str(d)).endswith('1231')]
+    valid_dates = valid_dates[-limit:]
+    date_str_list = [d.strftime("%Y%m%d") for d in valid_dates]
+    return date_str_list
+
 def get_financial_metrics(
     ticker: str,
     end_date: str,
@@ -233,11 +244,11 @@ def get_financial_metrics(
     print(f"start date: {start_date}")
     
     try:
-        # 获取主要财务指标
+        # 获取主要财务指标，该接口的返回以季度为单位，每季度返回一个数据，时间列为 "日期"。是个时点数据，年度报告就取 1231 日的
         fin_indicator = ak.stock_financial_analysis_indicator(symbol=pure_ticker, start_year=start_year)
         # print(f"api.py: fin_indicator: {fin_indicator}")
 
-        # 尝试获取资产负债表
+        # 尝试获取资产负债表，同上个接口，每季度返回一个数据，时间列为"报告日"，1231为年度数据
         try:
             balance_sheet = ak.stock_financial_report_sina(stock=ticker, symbol="资产负债表")
         except:
@@ -247,7 +258,7 @@ def get_financial_metrics(
                 balance_sheet = pd.DataFrame()
         # print(f"api.py: balance_sheet: {balance_sheet}")
 
-        # 尝试获取利润表
+        # 尝试获取利润表，同上个接口，每季度返回一个数据，时间列为"报告日"，1231为年度数据
         try:
             income_stmt = ak.stock_financial_report_sina(stock=ticker, symbol="利润表")
         except:
@@ -257,16 +268,7 @@ def get_financial_metrics(
                 income_stmt = pd.DataFrame()
         # print(f"api.py: income_stmt: {income_stmt}")
 
-        # 获取 东财 利润表数据
-        profit_sheet_dc = None
-        try:
-            profit_sheet_dc = ak.stock_profit_sheet_by_report_em(symbol=ticker)
-            # print(f"first get profit sheet from dc: {profit_sheet_dc}")
-        except Exception as e:
-            print(f"get profit_sheet_dc error: {e} ")
-            profit_sheet_dc = pd.DataFrame()
-
-        # 尝试获取现金流量表
+        # 尝试获取现金流量表，同上一个接口
         try:
             cash_flow = ak.stock_financial_report_sina(stock=ticker, symbol="现金流量表")
         except:
@@ -276,17 +278,27 @@ def get_financial_metrics(
                 cash_flow = pd.DataFrame()
         # print(f"api.py: cash_flow: {cash_flow}")
 
-        # 获取 东财 现金流量表数据
+        # 获取 东财 利润表数据，每季度返回一个数据，时间列为 'REPORT_DATE'，但带有 小时/分钟。年报同样取 REPORT_DATE=year-12-31 的，并用 REPORT_TYPE='年报' 进行了标记
+        profit_sheet_dc = None
+        try:
+            profit_sheet_dc = ak.stock_profit_sheet_by_report_em(symbol=ticker)
+            # print(f"first get profit sheet from dc: {profit_sheet_dc}")
+        except Exception as e:
+            print(f"get profit_sheet_dc error: {e} ")
+            profit_sheet_dc = pd.DataFrame()
+
+        # 获取 东财 现金流量表数据，同上一个接口
         try:
             cash_flow_dc = ak.stock_cash_flow_sheet_by_report_em(symbol=ticker)
         except:
             cash_flow_dc = pd.DataFrame()
 
-        # 计算 市盈率
+        # 单次获取指定 symbol 的所有历史数据，用以计算 市盈率
         stock_a_indicator = ak.stock_a_indicator_lg(pure_ticker)
         stock_a_indicator['date'] = stock_a_indicator['trade_date'].apply(normalize_date)
 
         print('-- calculate market_cap ----------------------------------------------------------------------------------------------------------------')
+        # 东财-个股-最新个股信息
         stock_individual_info_em_df = ak.stock_individual_info_em(symbol=pure_ticker)
         total_share_capital = stock_individual_info_em_df[stock_individual_info_em_df['item'] == "总股本"]["value"].values[0]
         # print(f"total_share_capital: {total_share_capital}")
@@ -295,16 +307,8 @@ def get_financial_metrics(
         # print(prices.tail())
         print('----------------------------------------------------------------------------------------------------------------')
 
-        # 获取报告期 - 优先使用财务指标的报告期
-        dates = []
-        if not fin_indicator.empty:
-            dates = fin_indicator[["日期"]]
-        
-        dates = dates["日期"].tolist()
-        # 只保留最近的limit个报告期且不晚于end_date
-        valid_dates = [d for d in dates if str(d) <= end_date]
-        valid_dates = valid_dates[:limit]
-        date_str_list = [d.strftime("%Y%m%d") for d in valid_dates]
+        # 取每年的12.31日数据
+        date_str_list = get_report_date_list(fin_indicator, limit)
 
         print(f"z222222222: {date_str_list}")        
         
@@ -334,6 +338,9 @@ def get_financial_metrics(
             pb = pdata['pb']
             ps = pdata['ps']
             print(pe, pb, ps)
+
+            print('------------- for date in date_list, calculate enterprise_value_to_revenue_ratio -------------------')
+            
             # 创建财务指标对象，使用安全的获取方式
             try:
                 # 计算企业价值
@@ -865,7 +872,7 @@ def test_get_financial_metrics():
     
     # 测试参数
     test_ticker = "SH600519"  # 贵州茅台
-    test_end_date = "2024-03-20"
+    test_end_date = "2025-03-20"
     test_period = "annual"
     test_limit = 3
     
